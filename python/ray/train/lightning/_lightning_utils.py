@@ -28,6 +28,7 @@ pl = import_lightning()
 _LIGHTNING_GREATER_EQUAL_2_0 = Version(pl.__version__) >= Version("2.0.0")
 _LIGHTNING_LESS_THAN_2_1 = Version(pl.__version__) < Version("2.1.0")
 _TORCH_GREATER_EQUAL_1_12 = Version(torch.__version__) >= Version("1.12.0")
+_TORCH_GREATER_EQUAL_2_4 = Version(torch.__version__) >= Version("2.4.0")
 _TORCH_FSDP_AVAILABLE = _TORCH_GREATER_EQUAL_1_12 and torch.distributed.is_available()
 
 try:
@@ -39,6 +40,20 @@ if _LIGHTNING_GREATER_EQUAL_2_0:
     FSDPStrategy = pl.strategies.FSDPStrategy
 else:
     FSDPStrategy = pl.strategies.DDPFullyShardedStrategy
+
+# ModelParallelStrategy is experimental and requires PyTorch 2.4+ and Lightning 2.0+
+_MODEL_PARALLEL_AVAILABLE = (
+    _LIGHTNING_GREATER_EQUAL_2_0
+    and _TORCH_GREATER_EQUAL_2_4
+    and hasattr(pl.strategies, "ModelParallelStrategy")
+)
+
+if _MODEL_PARALLEL_AVAILABLE:
+    ModelParallelStrategy = pl.strategies.ModelParallelStrategy
+else:
+    # Fallback when ModelParallelStrategy is not available - use object as base
+    ModelParallelStrategy = object
+
 
 if _TORCH_FSDP_AVAILABLE:
     from torch.distributed.fsdp import (
@@ -150,7 +165,7 @@ class RayFSDPStrategy(FSDPStrategy):  # noqa: F821
 
 
 @PublicAPI(stability="beta")
-class RayDeepSpeedStrategy(pl.strategies.DeepSpeedStrategy):
+class RayDeepSpeedStrategy(pl.strategies.DeepSpeedStrategy):  # noqa: F821
     """Subclass of DeepSpeedStrategy to ensure compatibility with Ray orchestration.
 
     For a full list of initialization arguments, please refer to:
@@ -160,6 +175,40 @@ class RayDeepSpeedStrategy(pl.strategies.DeepSpeedStrategy):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         record_extra_usage_tag(TagKey.TRAIN_LIGHTNING_RAYDEEPSPEEDSTRATEGY, "1")
+
+    @property
+    def root_device(self) -> torch.device:
+        return ray.train.torch.get_device()
+
+    @property
+    def distributed_sampler_kwargs(self) -> Dict[str, Any]:
+        return dict(
+            num_replicas=self.world_size,
+            rank=self.global_rank,
+        )
+
+
+@PublicAPI(stability="beta")
+class RayModelParallelStrategy(ModelParallelStrategy):  # noqa: F821
+    """Subclass of ModelParallelStrategy to ensure compatibility with Ray orchestration.
+
+    ModelParallelStrategy enables user-defined parallelism applied to a model, supporting
+    up to 2D parallelism with the combination of Fully Sharded Data-Parallel 2 (FSDP2)
+    and Tensor Parallelism (DTensor). This is an experimental feature that requires
+    PyTorch 2.4+ and Lightning 2.0+.
+
+    For a full list of initialization arguments, please refer to:
+    https://lightning.ai/docs/pytorch/stable/api/lightning.pytorch.strategies.ModelParallelStrategy.html
+
+    .. warning::
+        This is an experimental strategy. ModelParallelStrategy and its underlying
+        PyTorch APIs (DTensor) are still experimental in PyTorch.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # TODO: Add usage tag when TRAIN_LIGHTNING_RAYMODELPARALLELSTRATEGY is defined
+        # record_extra_usage_tag(TagKey.TRAIN_LIGHTNING_RAYMODELPARALLELSTRATEGY, "1")
 
     @property
     def root_device(self) -> torch.device:
@@ -210,7 +259,12 @@ def prepare_trainer(trainer: pl.Trainer) -> pl.Trainer:
     """Prepare the PyTorch Lightning Trainer for distributed execution."""
 
     # Check strategy class
-    valid_strategy_class = [RayDDPStrategy, RayFSDPStrategy, RayDeepSpeedStrategy]
+    valid_strategy_class = [
+        RayDDPStrategy,
+        RayFSDPStrategy,
+        RayDeepSpeedStrategy,
+        RayModelParallelStrategy,
+    ]
 
     if not any(isinstance(trainer.strategy, cls) for cls in valid_strategy_class):
         raise RuntimeError(
