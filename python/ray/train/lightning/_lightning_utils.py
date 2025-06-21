@@ -165,7 +165,7 @@ class RayFSDPStrategy(FSDPStrategy):  # noqa: F821
 
 
 @PublicAPI(stability="beta")
-class RayDeepSpeedStrategy(pl.strategies.DeepSpeedStrategy):  # noqa: F821
+class RayDeepSpeedStrategy(pl.strategies.DeepSpeedStrategy):
     """Subclass of DeepSpeedStrategy to ensure compatibility with Ray orchestration.
 
     For a full list of initialization arguments, please refer to:
@@ -189,7 +189,7 @@ class RayDeepSpeedStrategy(pl.strategies.DeepSpeedStrategy):  # noqa: F821
 
 
 @PublicAPI(stability="beta")
-class RayModelParallelStrategy(ModelParallelStrategy):  # noqa: F821
+class RayModelParallelStrategy(ModelParallelStrategy):
     """Subclass of ModelParallelStrategy to ensure compatibility with Ray orchestration.
 
     ModelParallelStrategy enables user-defined parallelism applied to a model, supporting
@@ -207,8 +207,7 @@ class RayModelParallelStrategy(ModelParallelStrategy):  # noqa: F821
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # TODO: Add usage tag when TRAIN_LIGHTNING_RAYMODELPARALLELSTRATEGY is defined
-        # record_extra_usage_tag(TagKey.TRAIN_LIGHTNING_RAYMODELPARALLELSTRATEGY, "1")
+        record_extra_usage_tag(TagKey.TRAIN_LIGHTNING_RAYMODELPARALLELSTRATEGY, "1")
 
     @property
     def root_device(self) -> torch.device:
